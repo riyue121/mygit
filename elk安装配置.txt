@@ -1,0 +1,228 @@
+
+
+安装JDK  安装最新版本的JDK jdk1.8.0_144
+    设置环境变量： 
+	JAVA_HOME=/app/tomcat/jdk1.8.0_144
+	export JAVA_HOME
+	
+ELK 安装步骤
+1） 配置yum源
+    [elasticsearch-5.x]
+    name=Elasticsearch repository for 5.x packages
+    baseurl=https://artifacts.elastic.co/packages/5.x/yum
+    gpgcheck=1
+    gpgkey=https://artifacts.elastic.co/GPG-KEY-elasticsearch
+    enabled=1
+    autorefresh=1
+    type=rpm-md
+2） 安装Elasticsearch
+	yum install elasticsearch
+3） 设置主机hosts
+    10.219.22.144  elk01
+    10.219.23.111  elk02
+    10.219.23.160  elk03
+4） 修改elasticsearch 配置文件
+    mkdir -p /app/elasticsearch/{data,logs}
+    chown -R elasticsearch.elasticsearch /app/elasticsearch/
+	
+	elk01：
+	[root@ip-10-219-22-144 elasticsearch]# grep -n '^[a-Z]' /etc/elasticsearch/elasticsearch.yml
+    17:cluster.name: anbanges
+    23:node.name: elk01
+    33:path.data: /app/elasticsearch/data
+    37:path.logs: /app/elasticsearch/logs
+    43:bootstrap.memory_lock: true
+    55:network.host: 0.0.0.0
+    59:http.port: 9200
+    68:discovery.zen.ping.unicast.hosts: ["10.219.23.111", "10.219.23.160"]
+    72:discovery.zen.minimum_master_nodes: 3
+	
+	elk02：
+	[root@ip-10-219-23-111 elasticsearch]# grep -n '^[a-Z]' /etc/elasticsearch/elasticsearch.yml
+    17:cluster.name: anbanges
+    23:node.name: elk02
+    33:path.data: /app/elasticsearch/data
+    37:path.logs: /app/elasticsearch/logs
+    43:bootstrap.memory_lock: true
+    55:network.host: 0.0.0.0
+    59:http.port: 9200
+    68:discovery.zen.ping.unicast.hosts: ["10.219.22.144", "10.219.23.160"]
+    72:discovery.zen.minimum_master_nodes: 3
+	
+	elk03：
+	[root@ip-10-219-23-160 elasticsearch]#  grep -n '^[a-Z]' /etc/elasticsearch/elasticsearch.yml
+    17:cluster.name: anbanges
+    23:node.name: elk03
+    33:path.data: /app/elasticsearch/data
+    37:path.logs: /app/elasticsearch/logs
+    43:bootstrap.memory_lock: true
+    55:network.host: 0.0.0.0
+    59:http.port: 9200
+    68:discovery.zen.ping.unicast.hosts: ["10.219.23.111", "10.219.22.144"]
+    72:discovery.zen.minimum_master_nodes: 3
+
+
+5） 安装插件 5.X 之后es不再集成某些插件管理，需要单独安装
+    x-packlicense申请：
+	https://www.elastic.co/subscriptions#request-info
+	
+	/usr/share/elasticsearch/bin/elasticsearch-plugin install -h 查看可用插件。
+	/usr/share/elasticsearch/bin/elasticsearch-plugin install analysis-icu
+	/usr/share/elasticsearch/bin/elasticsearch-plugin install x-pack  #每个节点都要安装
+	
+	
+    1、安装Elasticsearch的集群管理工具head，安装head之前需要安装nodejs
+	curl --silent --location https://rpm.nodesource.com/setup_8.x | sudo bash -
+	yum install -y nodejs  #aws由于内核升级了，默认识别到epel7，需要将epel7 修改为epel6
+	2、安装grunt
+	npm install grunt-cli
+	[root@ip-10-219-22-144 elasticsearch-head]# grunt -version
+    grunt-cli v1.2.0
+    grunt v1.0.1
+    
+	3、安装elasticsearch-head
+	git clone https://github.com/mobz/elasticsearch-head
+	cd elasticsearch-head
+	npm install
+	
+	编辑head/Gruntfile.js，修改服务器监听地址，增加hostname属性，将其值设置为*。
+	connect: {
+        hostname: '*',
+        server: {
+                options: {
+                        port: 7080,
+                        base: '.',
+                        keepalive: true
+                }
+        }
+	}
+	编辑head/_site/app.js，修改head连接es的地址，将localhost修改为es的IP地址，在head机器上有elasticsearch则不需要修改
+	this.base_uri = this.config.base_uri || this.prefs.get("app-base_uri") || "http://192.168.5.185:9200";
+	
+	注：如果出现下面问题： 
+	npm WARN elasticsearch-head@0.0.0 license should be a valid SPDX license expression 
+原因：spdx license，开源软件或者其他合作类软件的一个使用声明，查看官网https://spdx.org/licenses/，“License Text”里的内容 
+解决问题：打开elasticsearch-head目录下的package.json文件，找到license位置，修改为上面这个网站上存在Identifier 
+Apache内容修改为Apache-2.0
+	其他问题：可以忽略
+	npm WARN optional SKIPPING OPTIONAL DEPENDENCY: fsevents@^1.0.0 (node_modules/chokidar/node_modules/fsevents):
+    npm WARN notsup SKIPPING OPTIONAL DEPENDENCY: Unsupported platform for fsevents@1.1.2: wanted {"os":"darwin","arch":"any"} (current: {"os":"linux","arch":"x64"})
+
+6） 安装kibana  
+    yum install kibana
+	安装x-pack
+	 /usr/share/kibana/bin/kibana-plugin install x-pack
+	 
+7） 修改系统参数
+    
+    启动前需要修改配置文件(需要权限)
+    1. 设置内核参数
+    vim /etc/sysctl.conf
+    添加如下内容:
+    fs.file-max=65536
+    vm.max_map_count=262144
+    之后可以使用sysctl –a查看 –p刷新
+     
+    2. 设置资源参数
+    vim /etc/security/limits.conf
+    添加如下内容:
+    * soft nofile 65536
+    * hard nofile 131072
+    * soft nproc 2048
+    * hard nproc 4096
+	3 修改/etc/security/limits.d/20-nproc.conf 配置文件 
+	  * soft nproc 2048
+8） 修改elasticsearch.yml，增加跨域的配置(需要重启es才能生效)
+    vi /etc/elasticsearch/elasticsearch.yml
+    http.cors.enabled: true
+    http.cors.allow-origin: "*"
+    因为Centos6不支持SecComp，而ES5.2.0默认bootstrap.system_call_filter为true进行检测，所以导致检测失败，失败后直接导致ES不能启动。
+	启动时不打印日志，没有任何异常信息
+    解决：
+    在elasticsearch.yml中配置bootstrap.system_call_filter为false，注意要在Memory下面:
+	bootstrap.memory_lock: false
+	bootstrap.system_call_filter: false	
+9） 启动之前需要禁用X-Pack 插件 security，如果不设置调用es的接口时需要用户名和密码验证，而且Head也无法连接到集群。
+	vim kibana.yml
+	vim elasticsearch.yml
+	添加以下内容
+	xpack.security.enabled: false
+	
+10 head 启动
+   nohup grunt server > head.log 2>&1 &
+
+   
+Logstash 配置
+   1）配置java环境，安装logstash
+        yum install logstash
+   2) 生成启动脚本：yum安装系统没有带启动脚本
+        /usr/share/logstash/bin/system-install /etc/logstash/startup.options sysv
+   3） 修改配置文件 /etc/logstash.conf
+        input {
+            beats {
+            port => 9200
+            type => "logs"
+          }
+        }
+         
+        output {       
+          elasticsearch  {  
+            hosts => ["10.219.23.111:9200","10.219.23.160:9200","10.219.22.144:9200"]
+        	index => "logstash-%{type}-%{+YYYY.MM.dd}"
+            template_overwrite => true
+        	flush_size => 20
+            idle_flush_time => 10
+            sniffing => false
+          }
+        }
+Filebeat 安装
+
+	1） 启动 ./filebeat -e -c filebeat.yml
+	
+    
+	配置文件详解：
+	filebeat:
+    spool_size: 1024                                    # 最大可以攒够 1024 条数据一起发送出去
+    idle_timeout: "5s"                                  # 否则每 5 秒钟也得发送一次
+    config_dir: "path/to/configs/contains/many/yaml"    # 如果配置过长，可以通过目录加载方式拆分配置
+    prospectors:                                        # 有相同配置参数的可以归类为一个 prospector
+        -
+            fields:
+                ownfield: "mac"                         # 类似 logstash 的 add_fields
+            paths:
+                - /var/log/system.log                   # 指明读取文件的位置
+                - /var/log/wifi.log
+            include_lines: ["^ERR", "^WARN"]            # 只发送包含这些字样的日志
+            exclude_lines: ["^OK"]                      # 不发送包含这些字样的日志
+        -
+            document_type: "apache"                     # 定义写入 ES 时的 _type 值
+            ignore_older: "24h"                         # 超过 24 小时没更新内容的文件不再监听。在 windows 上另外有一个配置叫 force_close_files，只要文件名一变化立刻关闭文件句柄，保证文件可以被删除，缺陷是可能会有日志还没读完
+            scan_frequency: "10s"                       # 每 10 秒钟扫描一次目录，更新通配符匹配上的文件列表
+            tail_files: false                           # 是否从文件末尾开始读取
+            harvester_buffer_size: 16384                # 实际读取文件时，每次读取 16384 字节
+            backoff: "1s"                               # 每 1 秒检测一次文件是否有新的一行内容需要读取
+            paths:
+                - "/var/log/apache/*"                   # 可以使用通配符
+            exclude_files: ["/var/log/apache/error.log"]
+        -
+            input_type: "stdin"                         # 除了 "log"，还有 "stdin"
+            multiline:                                  # 多行合并
+                pattern: '^[[:space:]]'
+                negate: false
+                match: after
+    output:
+         ...
+
+
+
+	Filebeat 发送的日志，会包含以下字段：
+        beat.hostname beat 运行的主机名
+        beat.name shipper 配置段设置的 name，如果没设置，等于 beat.hostname
+        @timestamp 读取到该行内容的时间
+        type 通过 document_type 设定的内容
+        input_type 来自 "log" 还是 "stdin"
+        source 具体的文件名全路径
+        offset 该行日志的起始偏移量
+        message 日志内容
+        fields 添加的其他固定字段都存在这个对象里面
+
