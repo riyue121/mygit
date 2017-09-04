@@ -1,0 +1,3 @@
+由于tomcat默认限制post请求大小，导致第三方调图片上传接口无法上传，所以
+
+修改tomcat 下conf/server.xml 文件中在端口号下加一个maxPostSize="0"属性
